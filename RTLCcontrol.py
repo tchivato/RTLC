@@ -9,168 +9,158 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import hashlib
 
-# Obtener la fecha actual para el campo Lote
 current_datetime = time.localtime()
-default_lote = f"{current_datetime.tm_mday:02d}{current_datetime.tm_mon:02d}{current_datetime.tm_year % 100:02d}RF"
+default_batch = f"{current_datetime.tm_mday:02d}{current_datetime.tm_mon:02d}{current_datetime.tm_year % 100:02d}RF"
 
-def listar_puertos():
-    """Obtiene los puertos COM disponibles."""
+def list_ports():
     return [port.device for port in serial.tools.list_ports.comports()]
 
-def enviar_datos():
-    """Envía los datos por el puerto serie, registra las respuestas y actualiza el gráfico en tiempo real."""
-    global ser, posiciones, cuentas
+def send_data():
+    """Sends acquisition parameters through serial port, reads results and updates the graph."""
+    global ser, positions, counts
 
-    lote = entry_lote.get()
-    operador = entry_operador.get()
-    distancia = entry_distancia.get()
-    tiempo = entry_tiempo.get()
-    puerto = combobox_puertos.get()
+    batch = entry_batch.get()
+    operator = entry_operator.get()
+    distance = entry_distance.get()
+    time = entry_time.get()
+    port = combobox_ports.get()
 
-    # Validación de campos
-    if not lote:
-        messagebox.showerror("Error", "El campo 'Lote' es obligatorio.")
+    # Field validation
+    if not batch:
+        messagebox.showerror("Error", "Fill batch.")
         return
-    if not operador.isalpha():
-        messagebox.showerror("Error", "El campo 'Operador' solo puede contener letras.")
+    if not operator.isalpha():
+        messagebox.showerror("Error", "Operator must only contain letters.")
         return
-    if not distancia.isdigit() or not (10 <= int(distancia) <= 150):
-        messagebox.showerror("Error", "El campo 'Distancia' debe ser un número entre 10 y 150.")
+    if not distance.isdigit() or not (10 <= int(distance) <= 120):
+        messagebox.showerror("Error", "Distance must be between 10 and 120 mm.")
         return
-    if not tiempo.isdigit() or int(tiempo) < 1:
-        messagebox.showerror("Error", "El campo 'Tiempo' debe ser un número mayor que 1.")
+    if not time.isdigit() or int(time) < 1:
+        messagebox.showerror("Error", "Time must be at least 1 minute.")
         return
-    if not puerto:
-        messagebox.showerror("Error", "Seleccione un puerto COM válido.")
+    if not port:
+        messagebox.showerror("Error", "Select a valid COM port.")
         return
 
     try:
-        # Configurar el puerto serie
-        ser = serial.Serial(puerto, baudrate=9600, timeout=1)
-        datos = f"{lote},{operador},{distancia},{tiempo}\n"
-        ser.write(datos.encode())  # Enviar datos por el puerto serie
+        # Serial port settings
+        ser = serial.Serial(port, baudrate=9600, timeout=1)
+        data = f"{batch},{operator},{distance},{time}\n"
+        ser.write(data.encode())  
         ser.flush()
 
-        # Inicializar el gráfico
+        # Graph settings
         ax.clear()
-        ax.set_xlabel("Posición (mm)")
-        ax.set_ylabel("Cuentas")
+        ax.set_xlabel("Position (mm)")
+        ax.set_ylabel("counts")
         fig.tight_layout()
         canvas.draw()
 
-        # Inicializar listas de datos
-        posiciones = []
-        cuentas = []
+        positions = []
+        counts = []
 
-        # Cambiar el texto del botón a MIDIENDO
-        btn_run.config(text="MIDIENDO", state="disabled")
+        btn_run.config(text="MEASURING", state="disabled")
 
         root.update()
 
-        def finalizar_adquisicion():
-            """Finaliza la adquisición y guarda los datos en un archivo CSV."""
+        def end_acquisition():
+            """Ends acquisition and saves results."""
             if ser and ser.is_open:
                 ser.close()
 
-            # Guardar datos en un archivo CSV
-            data = {"Posición": posiciones, "Cuentas": cuentas}
+            # Saves results in CSV
+            data = {"Position": positions, "counts": counts}
             df = pd.DataFrame(data)
-            nombre_csv = f"{lote}.csv"
-            df['Posición'] = df['Posición'].apply(lambda x: f"{x:.1f}".replace('.', ','))
-            df.to_csv(nombre_csv, index=False, sep=';')
+            csv_name = f"{batch}.csv"
+            df['Position'] = df['Position'].apply(lambda x: f"{x:.1f}".replace('.', ','))
+            df.to_csv(csv_name, index=False, sep=';')
             
-            # Añade como metadatos las variables de adquisición
-            with open(nombre_csv, mode='a', encoding='utf-8') as archivo:
-                archivo.write(f"Lote:;{lote}\nOperador:;{operador}\nRango:;{distancia} mm\nTiempo adquisición:;{tiempo} min\n")
-                archivo.write(f"Fecha:;{time.strftime("%d/%m/%Y, %H:%M:%S", time.localtime())}\n")
+            # Adds variables as metadata
+            with open(csv_name, mode='a', encoding='utf-8') as archive:
+                archive.write(f"Batch:;{batch}\nOperator:;{operator}\nRange:;{distance} mm\nAcquisition time:;{time} min\n")
+                archive.write(f"Date:;{time.strftime("%d/%m/%Y, %H:%M:%S", time.localtime())}\n")
 
-            # Calcula hash para huella digital y lo añade al final del csv
-            with open(nombre_csv, "rb") as archivo:
+            # Adds hash to CSV
+            with open(csv_name, "rb") as archive:
                 hash_sha256 = hashlib.sha256()
-                for linea in archivo:
-                    hash_sha256.update(linea)
+                for line in archive:
+                    hash_sha256.update(line)
                 hash=hash_sha256.hexdigest()
                 
-            with open(nombre_csv, mode='a', encoding='utf-8') as archivo:
-                archivo.write(f"Huella SHA256:;{hash}")
+            with open(csv_name, mode='a', encoding='utf-8') as archive:
+                archive.write(f"SHA256 footprint:;{hash}")
                 
-            # Restaurar el botón a su estado original
             btn_run.config(text="START", state="normal")
 
-        def leer_puerto():
-            """Lee datos del puerto serie y actualiza el gráfico en tiempo real."""
+        def read_port():
+            """Reads serial port and updates graph."""
             if ser.in_waiting:
                 try:
-                    linea = ser.readline().decode('utf-8', errors='ignore').strip()
-                    if linea == "end":
-                        finalizar_adquisicion()
+                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line == "end":
+                        end_acquisition()
                         return
-                    if linea:
-                        posicion, cuenta = map(int, linea.split(";"))
-                        posiciones.append(posicion/10)
-                        cuentas.append(cuenta)
-                        # Actualizar el gráfico
+                    if line:
+                        position, count = map(int, line.split(";"))
+                        positions.append(position/10)
+                        counts.append(count)
+                        # Updates graph
                         ax.clear()
-                        ax.plot(posiciones, cuentas, marker="o", markersize=0.1, linestyle="-", color="blue")
-                        ax.set_xlabel("Posición (mm)")
-                        ax.set_ylabel("Cuentas")
-                        ax.set_xlim(0, float(distancia))
+                        ax.plot(positions, counts, marker="o", markersize=0.1, linestyle="-", color="blue")
+                        ax.set_xlabel("Position (mm)")
+                        ax.set_ylabel("Counts")
+                        ax.set_xlim(0, float(distance))
                         ax.set_ylim(0,)
                         fig.tight_layout()
                         canvas.draw()
                 except ValueError:
-                    pass  # Ignorar líneas inválidas
+                    pass
 
-            # Continuar leyendo en el siguiente ciclo
-            root.after(100, leer_puerto)
+            root.after(100, read_port)
 
-        # Iniciar la lectura del puerto serie
-        leer_puerto()
+        read_port()
 
     except serial.SerialException as e:
-        messagebox.showerror("Error", f"No se pudo abrir el puerto serie: {e}")
+        messagebox.showerror("Error", f"Couldn't open serial port: {e}")
         btn_run.config(text="START", state="normal")
     except Exception as e:
-        messagebox.showerror("Error", f"Error inesperado: {e}")
+        messagebox.showerror("Error", f"Unexpected error: {e}")
         btn_run.config(text="START", state="normal")
 
-# Crear la ventana principal
 root = tk.Tk()
-root.title("Control RTLC")
+root.title("RTLC Control")
 
-# Etiquetas y campos de entrada
-tk.Label(root, text="Lote:", anchor="e").grid(row=0, column=0, padx=10, pady=5, sticky="e")
-entry_lote = tk.Entry(root)
-entry_lote.insert(0, default_lote)
-entry_lote.grid(row=0, column=1, padx=10, pady=5)
+# Labels and data entry
+tk.Label(root, text="Batch:", anchor="e").grid(row=0, column=0, padx=10, pady=5, sticky="e")
+entry_batch = tk.Entry(root)
+entry_batch.insert(0, default_batch)
+entry_batch.grid(row=0, column=1, padx=10, pady=5)
 
-tk.Label(root, text="Operador:", anchor="e").grid(row=1, column=0, padx=10, pady=5, sticky="e")
-entry_operador = tk.Entry(root)
-entry_operador.grid(row=1, column=1, padx=10, pady=5)
+tk.Label(root, text="Operator:", anchor="e").grid(row=1, column=0, padx=10, pady=5, sticky="e")
+entry_operator = tk.Entry(root)
+entry_operator.grid(row=1, column=1, padx=10, pady=5)
 
-tk.Label(root, text="Rango (mm):", anchor="e").grid(row=2, column=0, padx=10, pady=5, sticky="e")
-entry_distancia = tk.Entry(root)
-entry_distancia.grid(row=2, column=1, padx=10, pady=5)
+tk.Label(root, text="Range (mm):", anchor="e").grid(row=2, column=0, padx=10, pady=5, sticky="e")
+entry_distance = tk.Entry(root)
+entry_distance.grid(row=2, column=1, padx=10, pady=5)
 
-tk.Label(root, text="Tiempo (min):", anchor="e").grid(row=3, column=0, padx=10, pady=5, sticky="e")
-entry_tiempo = tk.Entry(root)
-entry_tiempo.grid(row=3, column=1, padx=10, pady=5)
+tk.Label(root, text="Time (min):", anchor="e").grid(row=3, column=0, padx=10, pady=5, sticky="e")
+entry_time = tk.Entry(root)
+entry_time.grid(row=3, column=1, padx=10, pady=5)
 
-# Combobox para los puertos COM
-tk.Label(root, text="Puerto COM:", anchor="e").grid(row=4, column=0, padx=10, pady=5, sticky="e")
-puertos = listar_puertos()
-combobox_puertos = ttk.Combobox(root, values=puertos, state="readonly")
-combobox_puertos.grid(row=4, column=1, padx=10, pady=5)
+tk.Label(root, text="COM port:", anchor="e").grid(row=4, column=0, padx=10, pady=5, sticky="e")
+ports = list_ports()
+combobox_ports = ttk.Combobox(root, values=ports, state="readonly")
+combobox_ports.grid(row=4, column=1, padx=10, pady=5)
 
-# Botón para enviar datos
-btn_run = tk.Button(root, text="START", command=enviar_datos, font=("Helvetica", 15, "bold"))
+btn_run = tk.Button(root, text="START", command=send_data, font=("Helvetica", 15, "bold"))
 btn_run.grid(row=6, column=0, columnspan=2, pady=20, sticky="ew")
 
-# Área para el gráfico
+# Graph area
 fig = Figure(figsize=(5, 3), dpi=100)
 ax = fig.add_subplot(111)
 canvas = FigureCanvasTkAgg(fig, master=root)
 canvas.get_tk_widget().grid(row=8, column=0, columnspan=2, pady=10)
 
-# Iniciar la aplicación
+
 root.mainloop()
