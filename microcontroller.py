@@ -4,6 +4,8 @@ import select
 import sys
 import machine
 
+firmware = 'v1.1'
+deviceID = 'RTLC-02'
 
 def main():
 
@@ -54,7 +56,7 @@ def main():
         for _ in range(steps):
             # Limit switches check
             if direction and LIMIT_SWITCH_END.value():
-                print('end')
+                print(f'end_{firmware}_{deviceID}')
                 while not LIMIT_SWITCH_START.value():
                     step_motor(STEPS_PER_MM, False)
                 ENABLE.value(1)
@@ -96,7 +98,7 @@ def main():
                 step_motor(move_step, True) 
 
         # Returns to origin
-        print('end')
+        print(f'end_{firmware}_{deviceID}')
         while not LIMIT_SWITCH_START.value():
             step_motor(STEPS_PER_MM, False)
         ENABLE.value(1)  # Disables stepper
